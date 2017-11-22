@@ -19,7 +19,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -29,110 +28,100 @@ import (
 	"golang.org/x/net/html"
 )
 
-const defaultPath = "./link.txt"
+var app *Skapt.App
 
-// read all content into the p.body page
-func readPage(resp *http.Response, saveTo string, pref string) {
-	var (
-		z *html.Tokenizer
-	)
+func pageInto(resp *http.Response, out io.Writer, pref string) error {
+	var z *html.Tokenizer
 
-	// read page
-	if saveTo == "" {
-		saveTo = defaultPath
-	}
-
-	// create file
-	file, err := os.Create(saveTo)
-	if err != nil {
-		panic(err)
-	}
-
-	// take value per key
-	value := resp.Header.Get("Content-Encoding")
-
-	// test if the value is gzip or no
-	switch value {
+	switch resp.Header.Get("Content-Encoding") {
 	case "gzip":
 		r, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		z = html.NewTokenizer(r)
 	default:
-		rb, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			panic(err)
-		}
-		z = html.NewTokenizer(bytes.NewReader(rb))
+		z = html.NewTokenizer(resp.Body)
 	}
 
+	z.SetMaxBuf(2048)
 	for {
-		// get next html token
 		tt := z.Next()
 		switch {
 		case tt == html.ErrorToken:
-			if z.Err() == io.EOF {
-				if err := file.Close(); err != nil {
-					panic(err)
-				}
-				return
-			}
+			return nil
 		case tt == html.StartTagToken:
 			t := z.Token()
-			isAnchor := t.Data == "a" || t.Data == "img" || t.Data == "meta" || t.Data == "link" || t.Data == "script"
+			isAnchor := t.Data == "a" ||
+				t.Data == "img" ||
+				t.Data == "meta" ||
+				t.Data == "link" ||
+				t.Data == "script" ||
+				t.Data == "iframe"
 			if !isAnchor {
 				continue
 			}
-			ok, url := getHref(t)
-			if !ok {
-				continue
-			}
 
-			hasProto := strings.Index(url, "http") == 0 || strings.Index(url, "https") == 0
-
-			if hasProto {
-				// append to file
-				if _, err := file.WriteString(url + "\n"); err != nil {
-					panic(err)
+			if ok, url := link(t); ok {
+				if err := writeURL(out, pref, url); err != nil {
+					return err
 				}
-			} else if _, err := file.WriteString(pref + url + "\n"); err != nil {
-				panic(err)
 			}
-
 		}
 	}
-
 }
 
-func getHref(t html.Token) (bool, string) {
-	var (
-		href string
-		ok   bool
-	)
+func writeURL(out io.Writer, pref, url string) error {
+	if url == "" {
+		return fmt.Errorf("Empty URL given")
+	}
 
-	// Iterate all over the Token's attribute until we find "href"
+	hasProto := strings.Index(url, "http") == 0 ||
+		strings.Index(url, "https") == 0
+
+	var data []byte
+	switch hasProto {
+	case true:
+		data = []byte(url + "\n")
+	default:
+		data = []byte(pref + url + "\n")
+	}
+
+	if _, err := out.Write(data); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func link(t html.Token) (bool, string) {
+	var link string
+	ok := false
+
 	for _, a := range t.Attr {
-		if a.Key == "href" || a.Key == "src" || a.Key == "content" {
-			href = a.Val
-			ok = true
+		switch a.Key {
+		case "href", "src":
+			link = a.Val
+			if link != "" {
+				ok = true
+			}
+		case "content":
+			hasProto := strings.Index(a.Val, "http") == 0 ||
+				strings.Index(a.Val, "https") == 0
+			if hasProto {
+				link = a.Val
+				ok = true
+			}
 		}
 	}
 
-	return ok, href
+	return ok, link
 }
 
-// create a new cunstom request setting
-// headers and body
-func newCustomRequest(method, url string) (*http.Request, error) {
-
-	req, err := http.NewRequest(method, url, new(bytes.Buffer))
-
+func newRequest(url string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodGet, url, new(bytes.Buffer))
 	if err != nil {
-		return nil, fmt.Errorf(
-			"Can't create this custom request with method %s, and url %s\n ERROR: %s\n",
-			method, url, err.Error(),
-		)
+		return nil, err
 	}
 
 	req.Header.Add("User-Agent", "LinkTracker1.0.0")
@@ -145,56 +134,61 @@ func newCustomRequest(method, url string) (*http.Request, error) {
 	return req, nil
 }
 
-// create a new custom client with a specific timeout duration
-// on every request
-func newCustomClient(time time.Duration) *http.Client {
-	return &http.Client{Timeout: time}
-}
-
-// main request method
 func request() {
 	url := app.String("-u")
-	customPath := app.String("-f")
 
-	req, err := newCustomRequest("GET", url)
+	req, err := newRequest(url)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	// make new http Client object
-	// setting the timeout duration for every request
-	cli := newCustomClient(time.Duration(5 * time.Second))
+	cli := &http.Client{
+		Timeout: time.Duration(5 * time.Second),
+	}
 
-	// make the request
 	resp, err := cli.Do(req)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
 	defer func() {
 		if errClose := resp.Body.Close(); errClose != nil {
 			err = errClose
 		}
 	}()
 
+	out := os.Stdout
+	path := app.String("-f")
+	if path != "" {
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0644)
+		if err != nil {
+			panic(err)
+		}
+		out = file
+		defer func() {
+			if err = out.Close(); err != nil {
+				fmt.Printf(err.Error())
+			}
+		}()
+	}
+
 	switch resp.StatusCode {
 	case 200:
-		readPage(resp, customPath, url)
-		return
+		if err = pageInto(resp, out, url); err != nil {
+			fmt.Printf("Reading pager error occured: %s\n", err.Error())
+		}
 	default:
-		fmt.Println(fmt.Sprintf(
-			"Error occured with status %d\n", resp.StatusCode,
-		))
-		return
+		fmt.Printf(
+			"Http error occured with status %d\n", resp.StatusCode,
+		)
 	}
 }
 
-var app *Skapt.App
-
-func main() {
-	// init all the command line stuff from Skapt framework
+func init() {
 	app = Skapt.NewApp()
+
 	app.SetName("LinkTracker")
 	app.SetUsage("Track all link into one file")
 	app.SetDescription("This nitty gritty command line app watches a link, parsing every token, saving the link to a corresponding file")
@@ -207,13 +201,15 @@ func main() {
 		Type:        Skapt.STRING,
 		Action:      request,
 	})
+
 	app.AppendNewOption(Skapt.OptionParams{
 		Name:  "-f",
 		Alias: "--file", Description: "File you wish to pipe the results",
 		Type:   Skapt.STRING,
 		Action: nil,
 	})
+}
 
-	// run the app
+func main() {
 	app.Run()
 }
