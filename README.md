@@ -1,34 +1,20 @@
 # LinkTracker
 
-#### Command line tool for tracking href in a web page
+#### Command line tool for tracking links in a web page
 
 #### Dependencies
-	go get -v -u github.com/hoenirvili/Skapt
+	go get -v -u github.com/spf13/cobra
 	go get -v -u golang.org/x/net/html
 #### Output
 
 ```bash
-NAME:	LinkTracker
+Simple and easy way to parse and save links from a given web page
 
-USAGE:
-	Track all link into one file
+Usage:
+  linktrack [flags]
 
-DESCRIPTION:
-	This nitty gritty command line app watches a link, parsing every token, saving the link to a corresponding file
-
-OPTIONS:
-
-	-u, --url
-		Link to the specific url you wish to make the request
-
-	-f, --file
-		File you wish to pipe the results
-
-
-	--help, -h  print out the help message
-
-AUTHORS :
-	 Hoenirvili 
-VERSION:
-	1.0.0
+Flags:
+  -f, --file string   full path where to write results
+  -h, --help          help for linktrack
+      --version       version for linktrack
 ```
