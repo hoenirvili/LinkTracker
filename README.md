@@ -11,10 +11,14 @@
 Simple and easy way to parse and save links from a given web page
 
 Usage:
-  linktrack [flags]
+  linktracker [flags]
+
+Examples:
+linktracker -f /home/user/linkts.txt https://webpage.com
+linktracker https://webpage.com
 
 Flags:
   -f, --file string   full path where to write results
-  -h, --help          help for linktrack
-      --version       version for linktrack
+  -h, --help          help for linktracker
+      --version       version for linktracker
 ```
