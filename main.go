@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -171,19 +170,21 @@ var path string
 
 func main() {
 	root := cobra.Command{
-		Use:     "linktrack",
+		Use:     "linktracker",
 		Short:   "linktracker print or saves links from a web page",
 		Long:    "Simple and easy way to parse and save links from a given web page",
 		Version: "1.0.0",
 		RunE:    request,
-		Args:    cobra.MinimumNArgs(1),
+		Example: `linktracker -f /home/user/linkts.txt https://webpage.com
+linktracker https://webpage.com`,
+		Args: cobra.MinimumNArgs(1),
 	}
 
 	flags := root.Flags()
 	flags.StringVarP(&path, "file", "f", "", "full path where to write results")
 
 	if err := root.Execute(); err != nil {
-		log.Fatalln(err)
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }
